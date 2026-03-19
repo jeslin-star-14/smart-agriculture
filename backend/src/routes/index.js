@@ -2,11 +2,11 @@ import express from "express"
 import sensorRoutes from "./sensorRoutes.js"
 import deviceRoutes from "./deviceRoutes.js"
 
-const router = express.Router()
-
 export default (io) => {
 
-  router.use("/sensor", sensorRoutes(io))
+  const router = express.Router()
+
+  router.use("/sensor", sensorRoutes)
   router.use("/device", deviceRoutes)
 
   return router

@@ -1,10 +1,8 @@
 // backend/src/models/SensorData.js
-// REPLACE your existing SensorData.js with this file
-//
 // This model saves every Arduino sensor reading into MongoDB automatically.
 // Each document stores all sensor values + timestamp.
 
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const SensorDataSchema = new mongoose.Schema(
   {
@@ -62,4 +60,4 @@ const SensorDataSchema = new mongoose.Schema(
 SensorDataSchema.index({ createdAt: -1 });
 SensorDataSchema.index({ deviceId: 1, createdAt: -1 });
 
-module.exports = mongoose.model("SensorData", SensorDataSchema);
+export default mongoose.model("SensorData", SensorDataSchema);

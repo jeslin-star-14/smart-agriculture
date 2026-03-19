@@ -1,13 +1,11 @@
 // backend/src/controllers/sensorController.js
-// REPLACE your existing sensorController.js
-//
 // API endpoints to READ the saved sensor data from MongoDB
 
-const SensorData = require("../models/SensorData");
+import SensorData from "../models/SensorData.js";
 
 // ── GET /api/sensors/latest ────────────────────────────────────
 // Returns the single most recent reading
-const getLatest = async (req, res) => {
+export const getLatest = async (req, res) => {
   try {
     const latest = await SensorData
       .findOne()
@@ -26,7 +24,7 @@ const getLatest = async (req, res) => {
 
 // ── GET /api/sensors/history?limit=100&hours=24 ───────────────
 // Returns recent readings for charts / history view
-const getHistory = async (req, res) => {
+export const getHistory = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 100;
     const hours = parseInt(req.query.hours) || 24;
@@ -52,7 +50,7 @@ const getHistory = async (req, res) => {
 
 // ── GET /api/sensors/stats ────────────────────────────────────
 // Returns min/max/avg for each sensor over last 24 hours
-const getStats = async (req, res) => {
+export const getStats = async (req, res) => {
   try {
     const hours = parseInt(req.query.hours) || 24;
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
@@ -96,7 +94,7 @@ const getStats = async (req, res) => {
 
 // ── DELETE /api/sensors/clear ─────────────────────────────────
 // Clear all sensor data (for testing/reset)
-const clearAll = async (req, res) => {
+export const clearAll = async (req, res) => {
   try {
     const result = await SensorData.deleteMany({});
     res.json({ success: true, deleted: result.deletedCount });
@@ -104,5 +102,3 @@ const clearAll = async (req, res) => {
     res.status(500).json({ success: false, message: err.message });
   }
 };
-
-module.exports = { getLatest, getHistory, getStats, clearAll };
