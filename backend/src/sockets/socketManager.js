@@ -44,6 +44,10 @@ function initSocketManager(server) {
       port: ARDUINO_PORT,
     });
 
+    socket.on("check_arduino", () => {
+      socket.emit("arduino_status", { connected: arduinoConnected, port: ARDUINO_PORT });
+    });
+
     socket.on("disconnect", () => {
       logger.info(`Frontend client disconnected: ${socket.id}`);
     });
