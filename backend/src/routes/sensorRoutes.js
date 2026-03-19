@@ -1,13 +1,27 @@
-import express from "express"
-import { receiveSensorData, getLatestData } from "../controllers/sensorController.js"
+// backend/src/routes/sensorRoutes.js
+// REPLACE your existing sensorRoutes.js
 
-const router = express.Router()
+const express = require("express");
+const router  = express.Router();
+const {
+  getLatest,
+  getHistory,
+  getStats,
+  clearAll,
+} = require("../controllers/sensorController");
 
-export default (io) => {
+// GET  /api/sensors/latest       → most recent single reading
+router.get("/latest",  getLatest);
 
-  router.post("/", (req, res) => receiveSensorData(req, res, io))
+// GET  /api/sensors/history      → last N readings (default 100, last 24h)
+// GET  /api/sensors/history?limit=50&hours=6
+router.get("/history", getHistory);
 
-  router.get("/latest", getLatestData)
+// GET  /api/sensors/stats        → min/max/avg summary
+// GET  /api/sensors/stats?hours=48
+router.get("/stats",   getStats);
 
-  return router
-}
+// DELETE /api/sensors/clear      → wipe all data (testing only)
+router.delete("/clear", clearAll);
+
+module.exports = router;

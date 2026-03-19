@@ -1,30 +1,32 @@
 // backend/src/sockets/socketManager.js
-// REPLACE your existing socketManager.js with this file
+// REPLACE your existing socketManager.js
 //
-// This file does TWO things:
-//   1. Reads data from Arduino via USB Serial port (serialport npm package)
-//   2. Broadcasts live sensor data to all connected React clients via Socket.io
+// This file does THREE things:
+//  1. Reads JSON sensor data from Arduino via USB Serial port
+//  2. Saves every reading automatically to MongoDB (SensorData collection)
+//  3. Broadcasts live data to React frontend via Socket.io WebSocket
 
-const { Server } = require("socket.io");
-const { SerialPort } = require("serialport");
+const { Server }         = require("socket.io");
+const { SerialPort }     = require("serialport");
 const { ReadlineParser } = require("@serialport/parser-readline");
-const logger = require("../utils/logger");
+const SensorData         = require("../models/SensorData");
+const logger             = require("../utils/logger");
 
-// ── Configuration ─────────────────────────────────────────────
-// Change ARDUINO_PORT to match your system:
-//   Mac/Linux:  /dev/tty.usbmodem* or /dev/ttyACM0 or /dev/ttyUSB0
-//   Windows:    COM3, COM4, COM5 etc.
-// 
-// TIP: In Arduino IDE → Tools → Port — copy the port name shown there
+// ── Config (set in backend/.env) ──────────────────────────────
 const ARDUINO_PORT = process.env.ARDUINO_PORT || "/dev/tty.usbmodem1101";
 const BAUD_RATE    = parseInt(process.env.BAUD_RATE) || 9600;
+const DEVICE_ID    = process.env.DEVICE_ID    || "arduino-uno-01";
 
-let serialPort = null;
-let ioInstance  = null;
+// Save to DB every N readings (1 = save every reading)
+// Increase to reduce DB writes e.g. 5 = save 1 out of every 5 readings
+const SAVE_EVERY = parseInt(process.env.SAVE_EVERY) || 1;
+
+let ioInstance       = null;
 let arduinoConnected = false;
-let retryTimer = null;
+let retryTimer       = null;
+let readingCount     = 0;
 
-// ── Initialize Socket.io + Serial ─────────────────────────────
+// ── Initialize ────────────────────────────────────────────────
 function initSocketManager(server) {
   ioInstance = new Server(server, {
     cors: {
@@ -33,11 +35,10 @@ function initSocketManager(server) {
     },
   });
 
-  // Handle browser WebSocket connections
   ioInstance.on("connection", (socket) => {
     logger.info(`Frontend client connected: ${socket.id}`);
 
-    // Send current Arduino connection status immediately on connect
+    // Send current Arduino status immediately when browser connects
     socket.emit("arduino_status", {
       connected: arduinoConnected,
       port: ARDUINO_PORT,
@@ -48,18 +49,16 @@ function initSocketManager(server) {
     });
   });
 
-  // Start trying to connect to Arduino
   connectArduino();
-
   return ioInstance;
 }
 
-// ── Connect to Arduino Serial Port ────────────────────────────
+// ── Connect to Arduino via Serial ─────────────────────────────
 function connectArduino() {
-  logger.info(`Attempting Arduino connection on ${ARDUINO_PORT} at ${BAUD_RATE} baud...`);
+  logger.info(`Connecting to Arduino on ${ARDUINO_PORT} @ ${BAUD_RATE} baud...`);
 
   try {
-    serialPort = new SerialPort({
+    const serialPort = new SerialPort({
       path: ARDUINO_PORT,
       baudRate: BAUD_RATE,
       autoOpen: true,
@@ -67,56 +66,65 @@ function connectArduino() {
 
     const parser = serialPort.pipe(new ReadlineParser({ delimiter: "\n" }));
 
-    // ── Serial port opened successfully ──
+    // ── Port opened ───────────────────────────────────────────
     serialPort.on("open", () => {
       arduinoConnected = true;
       logger.info(`✓ Arduino connected on ${ARDUINO_PORT}`);
 
-      // Tell all frontend clients Arduino is connected
       if (ioInstance) {
         ioInstance.emit("arduino_status", { connected: true, port: ARDUINO_PORT });
       }
     });
 
-    // ── Parse each line of JSON from Arduino ──
-    parser.on("data", (line) => {
+    // ── Incoming data line from Arduino ───────────────────────
+    parser.on("data", async (line) => {
       line = line.trim();
       if (!line) return;
 
       logger.debug(`Serial RX: ${line}`);
 
       try {
-        const data = JSON.parse(line);
+        const raw = JSON.parse(line);
 
-        // Skip status/error messages
-        if (data.status || data.error) {
-          logger.info(`Arduino: ${line}`);
+        // Skip status/error handshake messages
+        if (raw.status || raw.error) {
+          logger.info(`Arduino msg: ${line}`);
           return;
         }
 
-        // Build normalized sensor payload
+        // ── Build normalized payload ──────────────────────────
         const payload = {
-          temperature:  data.temp  !== undefined ? parseFloat(data.temp)  : null,
-          humidity:     data.hum   !== undefined ? parseFloat(data.hum)   : null,
-          soilMoisture: data.soil  !== undefined ? parseFloat(data.soil)  : null,
-          light:        data.light !== undefined ? parseFloat(data.light) : null,
-          ph:           data.ph    !== undefined ? parseFloat(data.ph)    : null,
-          rain:         data.rain  !== undefined ? parseInt(data.rain)    : null,
-          timestamp:    new Date().toISOString(),
+          temperature:  raw.temp  !== undefined ? parseFloat(raw.temp)  : null,
+          humidity:     raw.hum   !== undefined ? parseFloat(raw.hum)   : null,
+          soilMoisture: raw.soil  !== undefined ? parseFloat(raw.soil)  : null,
+          light:        raw.light !== undefined ? parseFloat(raw.light) : null,
+          ph:           raw.ph    !== undefined ? parseFloat(raw.ph)    : null,
+          rain:         raw.rain  !== undefined ? parseInt(raw.rain)    : null,
+          deviceId:     DEVICE_ID,
+          status:       "ok",
         };
 
-        // Broadcast to all connected React clients
+        // ── 1. Save to MongoDB ────────────────────────────────
+        readingCount++;
+        if (readingCount % SAVE_EVERY === 0) {
+          await saveToDatabase(payload);
+        }
+
+        // ── 2. Broadcast to all React clients via Socket.io ───
         if (ioInstance) {
-          ioInstance.emit("sensor_data", payload);
+          ioInstance.emit("sensor_data", {
+            ...payload,
+            timestamp: new Date().toISOString(),
+          });
         }
 
       } catch (e) {
-        // Non-JSON line (debug print from Arduino) — log but don't crash
-        logger.debug(`Non-JSON serial data: ${line}`);
+        // Non-JSON line — Arduino debug print, ignore
+        logger.debug(`Non-JSON serial: ${line}`);
       }
     });
 
-    // ── Serial port error ──
+    // ── Serial error ──────────────────────────────────────────
     serialPort.on("error", (err) => {
       arduinoConnected = false;
       logger.error(`Serial error: ${err.message}`);
@@ -124,50 +132,54 @@ function connectArduino() {
       if (ioInstance) {
         ioInstance.emit("arduino_status", { connected: false, error: err.message });
       }
-
       scheduleRetry();
     });
 
-    // ── Serial port closed ──
+    // ── Serial closed ─────────────────────────────────────────
     serialPort.on("close", () => {
       arduinoConnected = false;
-      logger.warn("Serial port closed. Will retry in 5s...");
+      logger.warn("Serial port closed. Retrying in 5s...");
 
       if (ioInstance) {
         ioInstance.emit("arduino_status", { connected: false });
       }
-
       scheduleRetry();
     });
 
   } catch (err) {
     arduinoConnected = false;
-    logger.error(`Failed to open serial port: ${err.message}`);
-    logger.warn(`Make sure Arduino is plugged in and port ${ARDUINO_PORT} is correct in .env`);
+    logger.error(`Cannot open serial port: ${err.message}`);
+    logger.warn(`Check ARDUINO_PORT in .env — currently set to: ${ARDUINO_PORT}`);
     scheduleRetry();
+  }
+}
+
+// ── Save sensor reading to MongoDB ────────────────────────────
+async function saveToDatabase(payload) {
+  try {
+    const doc = new SensorData(payload);
+    await doc.save();
+    logger.info(
+      `💾 Saved to MongoDB — ` +
+      `T:${payload.temperature}°C | ` +
+      `H:${payload.humidity}% | ` +
+      `Soil:${payload.soilMoisture}% | ` +
+      `Light:${payload.light}lux | ` +
+      `pH:${payload.ph} | ` +
+      `Rain:${payload.rain}`
+    );
+  } catch (err) {
+    logger.error(`MongoDB save failed: ${err.message}`);
   }
 }
 
 // ── Retry connection every 5 seconds ──────────────────────────
 function scheduleRetry() {
-  if (retryTimer) return; // already scheduled
+  if (retryTimer) return;
   retryTimer = setTimeout(() => {
     retryTimer = null;
     if (!arduinoConnected) connectArduino();
   }, 5000);
 }
 
-// ── List available serial ports (helper for debugging) ────────
-async function listPorts() {
-  try {
-    const ports = await SerialPort.list();
-    logger.info("Available serial ports:");
-    ports.forEach(p => logger.info(`  ${p.path} — ${p.manufacturer || "unknown"}`));
-    return ports;
-  } catch (e) {
-    logger.error("Could not list ports:", e.message);
-    return [];
-  }
-}
-
-module.exports = { initSocketManager, listPorts };
+module.exports = { initSocketManager };
