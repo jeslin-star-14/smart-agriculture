@@ -1,7 +1,7 @@
 // frontend/src/pages/LoginPage.jsx
 import { useState } from "react";
 
-const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://localhost:3001";
+const BACKEND = import.meta.env.VITE_BACKEND_URL || "http://localhost:5001";
 
 export default function LoginPage({ onLogin, onGoRegister }) {
   const [form, setForm]         = useState({ emailOrUsername: "", password: "" });
