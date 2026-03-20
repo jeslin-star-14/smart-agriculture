@@ -7,9 +7,12 @@ import SensorChart from "./components/SensorChart";
 import StatusIndicator from "./components/StatusIndicator";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
-import HistoryPage from "./pages/History";
+import SensorsPage from "./pages/SensorPage";
+import HistoryPage from "./pages/HistoryPage";
+import AnalyticsPage from "./pages/AnalyticsPage";
+import SettingsPage from "./pages/SettingsPage";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5000";
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://localhost:5001";
 const INIT = { temperature:"--.-", humidity:"--.-", soilMoisture:"--.-", light:"---", ph:"-.-", rain:"--" };
 const CARDS = [
   { key:"temperature",  label:"Temperature",  icon:"🌡", unit:"°C",    type:"temperature" },
@@ -27,7 +30,8 @@ export default function App() {
   const [loggedIn, setLoggedIn]     = useState(false);
   const [sessionChecked, setSessionChecked] = useState(false); // prevents flash
 
-  const [connStatus, setConnStatus] = useState("connecting");
+  const [connStatus, setConnStatus] = useState("disconnected");
+  const [cloudMode, setCloudMode]     = useState(false);
   const [monitoring, setMonitoring] = useState(false);
   const [sensorData, setSensorData] = useState(INIT);
   const [sensorHistory, setSensorHistory] = useState([]); // rolling 200 for analytics
@@ -53,7 +57,7 @@ export default function App() {
 
       // Ask backend if token is still valid
       try {
-        const base = (typeof import.meta !== "undefined" && import.meta.env?.VITE_BACKEND_URL) || "http://localhost:5000";
+        const base = (typeof import.meta !== "undefined" && import.meta.env?.VITE_BACKEND_URL) || "http://localhost:5001";
         const res  = await fetch(base + "/api/auth/verify", {
           headers: { Authorization: "Bearer " + token },
         });
@@ -94,7 +98,8 @@ export default function App() {
     socketRef.current=socket;
     socket.on("connect",()=>addLog("Connected to backend","ok"));
     socket.on("disconnect",()=>{ addLog("Backend disconnected","err"); setConnStatus("disconnected"); setMonitoring(false); monitorRef.current=false; });
-    socket.on("arduino_status",({connected,port,error})=>{
+    socket.on("arduino_status",({connected,port,error,cloudMode:cm})=>{
+      if(cm){ setCloudMode(true); setConnStatus("disconnected"); addLog("☁️ Running in cloud mode","ok"); return; }
       if(connected){ setConnStatus("connected"); addLog(`✓ Arduino on ${port}`,"ok"); }
       else{ setConnStatus("disconnected"); addLog(error||"Arduino not detected","warn"); setMonitoring(false); monitorRef.current=false; }
     });
@@ -152,6 +157,7 @@ export default function App() {
         onStart={handleStart} onStop={handleStop} onRetry={handleRetry}
         user={user} onLogout={handleLogout}
         activePage={page} onPageChange={setPage}
+        cloudMode={cloudMode}
       />
 
       <main style={{maxWidth:1280,margin:"0 auto",padding:"28px 24px"}}>
@@ -171,7 +177,7 @@ export default function App() {
                 {monitoring?`Streaming live · ${msgRate} msg/s`:"Monitoring paused"}
               </div>
             </div>
-            <StatusIndicator status={connStatus} msgRate={msgRate}/>
+            <StatusIndicator status={connStatus} msgRate={msgRate} cloudMode={cloudMode}/>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"16px",marginBottom:"24px"}}>
               {CARDS.map((c,i)=>(
                 <div key={c.key} style={{animation:`fadeUp 0.5s ease ${i*0.06}s both`}}>
@@ -206,7 +212,10 @@ export default function App() {
           </div>
         )}
 
+        {page==="Sensors"   && <SensorsPage   sensorData={sensorData} connStatus={connStatus} monitoring={monitoring}/>}
         {page==="History"   && <HistoryPage/>}
+        {page==="Analytics" && <AnalyticsPage sensorHistory={sensorHistory}/>}
+        {page==="Settings"  && <SettingsPage  user={user} onUserUpdate={u=>{setUser(u);}}/>}
       </main>
 
       <style>{`
