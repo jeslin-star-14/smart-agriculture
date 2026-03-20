@@ -131,6 +131,13 @@ export default function App() {
   function handleStart()     { monitorRef.current=true;  setMonitoring(true);  setSensorData(INIT); addLog("▶ Live monitoring started","ok"); }
   function handleStop()      { monitorRef.current=false; setMonitoring(false); addLog("■ Monitoring stopped","warn"); }
   function handleRetry()     { addLog("⟳ Retrying…","info"); setConnStatus("connecting"); socketRef.current?.emit("check_arduino"); }
+  function handleConnect()   {
+    addLog("🔌 Checking Arduino connection…","info");
+    setConnStatus("connecting");
+    if (socketRef.current) {
+      socketRef.current.emit("check_arduino");
+    }
+  }
 
   const logColor = { ok:"#10b981", warn:"#f59e0b", err:"#ef4444", info:"#60a5fa" };
 
@@ -158,6 +165,7 @@ export default function App() {
         user={user} onLogout={handleLogout}
         activePage={page} onPageChange={setPage}
         cloudMode={cloudMode}
+        onConnect={handleConnect}
       />
 
       <main style={{maxWidth:1280,margin:"0 auto",padding:"28px 24px"}}>
