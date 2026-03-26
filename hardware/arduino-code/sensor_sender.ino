@@ -1,83 +1,59 @@
-#include <WiFiS3.h>
-#include <ArduinoHttpClient.h>
-#include "DHT.h"
+#include <DHT.h>
 
-#define DHTPIN 2
-#define DHTTYPE DHT11
+// ====== PIN DEFINITIONS ======
+#define DHTPIN 2          
+#define DHTTYPE DHT22     
+#define SOIL_PIN A0       
 
-#define SOIL_SENSOR A0
-#define LIGHT_SENSOR A1
-
+// ====== OBJECT CREATION ======
 DHT dht(DHTPIN, DHTTYPE);
 
-char ssid[] = "YOUR_WIFI_NAME";
-char password[] = "YOUR_WIFI_PASSWORD";
+// ====== VARIABLES ======
+float temperature = 0;
+float humidity = 0;
+int soilValue = 0;
 
-char serverAddress[] = "192.168.1.10";  
-int port = 5000;
-
-WiFiClient wifi;
-HttpClient client = HttpClient(wifi, serverAddress, port);
-
+// ====== SETUP ======
 void setup() {
-
   Serial.begin(9600);
   dht.begin();
 
-  while (!Serial);
-
-  Serial.println("Connecting to WiFi...");
-
-  while (WiFi.begin(ssid, password) != WL_CONNECTED) {
-    delay(2000);
-    Serial.println("Retrying WiFi...");
-  }
-
-  Serial.println("WiFi Connected");
+  Serial.println("System Initializing...");
+  delay(2000);
 }
 
+// ====== LOOP ======
 void loop() {
 
-  float temperature = dht.readTemperature();
-  float humidity = dht.readHumidity();
+  humidity = dht.readHumidity();
+  temperature = dht.readTemperature();
 
-  int soilValue = analogRead(SOIL_SENSOR);
-  int lightValue = analogRead(LIGHT_SENSOR);
+  if (isnan(humidity) || isnan(temperature)) {
+    Serial.println("Error reading from DHT sensor!");
+  } else {
+    Serial.print("Temperature: ");
+    Serial.print(temperature);
+    Serial.print(" °C  |  ");
 
-  int soilPercent = map(soilValue, 1023, 0, 0, 100);
+    Serial.print("Humidity: ");
+    Serial.print(humidity);
+    Serial.print(" %  |  ");
+  }
 
-  Serial.println("Sending Sensor Data...");
-  Serial.print("Soil: ");
-  Serial.println(soilPercent);
+  soilValue = analogRead(SOIL_PIN);
 
-  Serial.print("Temp: ");
-  Serial.println(temperature);
+  Serial.print("Soil Moisture: ");
+  Serial.print(soilValue);
 
-  Serial.print("Humidity: ");
-  Serial.println(humidity);
+  if (soilValue < 300) {
+    Serial.println(" (Very Wet)");
+  } else if (soilValue < 600) {
+    Serial.println(" (Moist)");
+  } else {
+    Serial.println(" (Dry)");
+  }
 
-  Serial.print("Light: ");
-  Serial.println(lightValue);
+  Serial.println("-----------------------------------");
 
-  String jsonData = "{";
-  jsonData += "\"soil\":" + String(soilPercent) + ",";
-  jsonData += "\"temperature\":" + String(temperature) + ",";
-  jsonData += "\"humidity\":" + String(humidity) + ",";
-  jsonData += "\"light\":" + String(lightValue);
-  jsonData += "}";
-
-  client.beginRequest();
-  client.post("/api/sensor");
-  client.sendHeader("Content-Type", "application/json");
-  client.sendHeader("Content-Length", jsonData.length());
-  client.beginBody();
-  client.print(jsonData);
-  client.endRequest();
-
-  int statusCode = client.responseStatusCode();
-
-  Serial.print("Server Response: ");
-  Serial.println(statusCode);
-
-  delay(5000);
+  delay(2000);
 }
